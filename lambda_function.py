@@ -8,11 +8,11 @@ from datetime import datetime
 from botocore.exceptions import ClientError
 from decimal import Decimal
 
-# 配置日志
+# Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# 初始化AWS客户端
+# Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(os.environ.get('DYNAMODB_TABLE', 'stock-table'))
 runtime = boto3.client('sagemaker-runtime')
@@ -26,7 +26,7 @@ class DecimalEncoder(json.JSONEncoder):
 
 def calculate_indicators(data_list):
     """
-    计算技术指标
+    Calculate technical indicators
     """
     try:
         prices = [float(d['price']) for d in data_list]
@@ -53,10 +53,10 @@ def calculate_indicators(data_list):
 
 def predict(data):
     """
-    使用SageMaker端点进行预测
+    Make predictions using SageMaker endpoint
     """
     try:
-        # 准备预测数据
+        # Prepare prediction data
         prediction_data = [
             float(data['price']),
             float(data['volume']),
@@ -65,7 +65,7 @@ def predict(data):
             float(data['indicator']['signal'])
         ]
         
-        # 调用SageMaker端点
+        # Call SageMaker endpoint
         response = runtime.invoke_endpoint(
             EndpointName=endpoint_name,
             ContentType='application/json',
@@ -80,25 +80,25 @@ def predict(data):
 
 def process_record(record, historical_data):
     """
-    处理单个Kinesis记录
+    Process a single Kinesis record
     """
     try:
-        # 解码和解析数据
+        # Decode and parse data
         payload = json.loads(record['kinesis']['data'])
         
-        # 添加时间戳
+        # Add timestamp
         current_time = datetime.utcnow()
         payload['timestamp'] = Decimal(str(current_time.timestamp()))
         payload['datetime'] = current_time.isoformat()
         
-        # 确保数值类型正确
+        # Ensure correct numeric types
         payload['price'] = Decimal(str(payload['price']))
         payload['volume'] = Decimal(str(payload['volume']))
         
-        # 添加到历史数据
+        # Add to historical data
         historical_data.append(payload)
         
-        # 计算技术指标
+        # Calculate technical indicators
         indicators = calculate_indicators(historical_data)
         if indicators:
             payload['indicator'] = indicators
@@ -107,7 +107,7 @@ def process_record(record, historical_data):
                 payload['prediction'] = 'UP' if prediction > 0.5 else 'DOWN'
                 payload['prediction_value'] = prediction
         
-        # 存储到DynamoDB
+        # Store in DynamoDB
         table.put_item(Item=payload)
         logger.info(f"Successfully processed record for {payload.get('stock_symbol')}")
         
@@ -118,7 +118,7 @@ def process_record(record, historical_data):
 
 def lambda_handler(event, context):
     """
-    Lambda处理程序
+    Lambda handler function
     """
     try:
         historical_data = []
