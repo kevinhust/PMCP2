@@ -58,11 +58,48 @@ fi
 
 # Create Kinesis stream
 echo "Creating Kinesis stream '$STREAM_NAME'..."
+# Check if stream exists
+if aws kinesis describe-stream --stream-name "$STREAM_NAME" --region "$REGION" 2>/dev/null; then
+    echo "Stream already exists. Deleting it first..."
+    aws kinesis delete-stream --stream-name "$STREAM_NAME" --region "$REGION"
+    # Wait for stream to be deleted
+    aws kinesis wait stream-not-exists --stream-name "$STREAM_NAME" --region "$REGION"
+fi
+
+# Create new stream
 aws kinesis create-stream \
     --stream-name "$STREAM_NAME" \
     --shard-count "$STREAM_SHARD_COUNT" \
     --region "$REGION" || { echo "Kinesis creation failed"; exit 1; }
-aws kinesis wait stream-exists --stream-name "$STREAM_NAME" --region "$REGION" || { echo "Kinesis stream not ready"; exit 1; }
+
+# Wait for stream to be ready
+echo "Waiting for Kinesis stream to be ready..."
+MAX_RETRIES=30
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    STREAM_STATUS=$(aws kinesis describe-stream \
+        --stream-name "$STREAM_NAME" \
+        --region "$REGION" \
+        --query 'StreamDescription.StreamStatus' \
+        --output text 2>/dev/null || echo "CREATING")
+    
+    if [ "$STREAM_STATUS" = "ACTIVE" ]; then
+        echo "Kinesis stream '$STREAM_NAME' is now active!"
+        break
+    elif [ "$STREAM_STATUS" = "CREATING" ]; then
+        echo "Stream is still creating... (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+        sleep 10
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    else
+        echo "Unexpected stream status: $STREAM_STATUS"
+        exit 1
+    fi
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    echo "Timeout waiting for Kinesis stream to become active"
+    exit 1
+fi
 
 # Create DynamoDB table with on-demand capacity
 echo "Creating DynamoDB table '$TABLE_NAME'..."
