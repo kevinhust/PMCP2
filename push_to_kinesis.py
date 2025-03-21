@@ -4,27 +4,55 @@ import time
 import json
 import logging
 import os
+import signal
+import sys
 from botocore.exceptions import ClientError
-from datetime import datetime
-from typing import Dict, Any
+from datetime import datetime, timezone
+from typing import Dict, Any, List
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('stock_data.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
 # Configuration
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
 STREAM_NAME = os.environ.get('KINESIS_STREAM', 'stock-stream')
-DEFAULT_SYMBOL = os.environ.get('STOCK_SYMBOL', 'TSLA')
-RETRY_ATTEMPTS = 3
-SLEEP_INTERVAL = 60  # seconds
+DEFAULT_SYMBOLS = os.environ.get('STOCK_SYMBOLS', 'TSLA,MSFT,AAPL').split(',')
+RETRY_ATTEMPTS = int(os.environ.get('RETRY_ATTEMPTS', '3'))
+SLEEP_INTERVAL = int(os.environ.get('SLEEP_INTERVAL', '60'))
+MAX_ERRORS = int(os.environ.get('MAX_ERRORS', '5'))
+TRADING_HOURS_ONLY = os.environ.get('TRADING_HOURS_ONLY', 'true').lower() == 'true'
 
 # Initialize Kinesis client
 kinesis_client = boto3.client('kinesis', region_name=REGION)
+
+def is_trading_hours() -> bool:
+    """
+    Check if current time is within US market trading hours (9:30 AM - 4:00 PM EST)
+    """
+    if not TRADING_HOURS_ONLY:
+        return True
+        
+    now = datetime.now(timezone.utc)
+    est_time = now.astimezone(timezone.timezone('America/New_York'))
+    
+    # Check if it's a weekday
+    if est_time.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+        
+    # Check if it's within trading hours
+    trading_start = est_time.replace(hour=9, minute=30, second=0, microsecond=0)
+    trading_end = est_time.replace(hour=16, minute=0, second=0, microsecond=0)
+    
+    return trading_start <= est_time <= trading_end
 
 @retry(
     stop=stop_after_attempt(RETRY_ATTEMPTS),
@@ -82,34 +110,51 @@ def get_stock_data(symbol: str) -> Dict[str, Any]:
             'datetime': current_time.isoformat(),
             'high': float(latest['High']),
             'low': float(latest['Low']),
-            'open': float(latest['Open'])
+            'open': float(latest['Open']),
+            'market_cap': stock.info.get('marketCap', None),
+            'day_high': float(latest['High']),
+            'day_low': float(latest['Low']),
+            'prev_close': stock.info.get('previousClose', None)
         }
     except Exception as e:
         logger.error(f"Failed to fetch stock data for {symbol}: {str(e)}")
         raise
 
-def fetch_realtime_data(symbol: str = DEFAULT_SYMBOL) -> None:
+def process_symbols(symbols: List[str]) -> None:
     """
-    Continuously fetch and push real-time stock data
+    Process multiple stock symbols
     
     Args:
-        symbol: Stock symbol
+        symbols: List of stock symbols to process
     """
-    logger.info(f"Starting real-time data fetch for {symbol}")
     errors_count = 0
     
     while True:
         try:
-            stock_data = get_stock_data(symbol)
-            send_to_kinesis(stock_data)
-            logger.info(f"Successfully processed data for {symbol}")
-            errors_count = 0  # Reset error counter
+            if not is_trading_hours():
+                logger.info("Outside trading hours. Waiting...")
+                time.sleep(SLEEP_INTERVAL)
+                continue
+                
+            for symbol in symbols:
+                try:
+                    stock_data = get_stock_data(symbol)
+                    send_to_kinesis(stock_data)
+                    logger.info(f"Successfully processed data for {symbol}")
+                except Exception as e:
+                    logger.error(f"Error processing {symbol}: {str(e)}")
+                    errors_count += 1
+                    if errors_count >= MAX_ERRORS:
+                        raise
+                    continue
+                    
+            errors_count = 0  # Reset error counter after successful processing
             
         except Exception as e:
             errors_count += 1
-            logger.error(f"Error processing data: {str(e)}")
+            logger.error(f"Error in main loop: {str(e)}")
             
-            if errors_count >= RETRY_ATTEMPTS:
+            if errors_count >= MAX_ERRORS:
                 logger.critical(f"Too many consecutive errors ({errors_count}). Exiting...")
                 raise
             
@@ -119,10 +164,24 @@ def fetch_realtime_data(symbol: str = DEFAULT_SYMBOL) -> None:
             
         time.sleep(SLEEP_INTERVAL)
 
+def signal_handler(signum, frame):
+    """
+    Handle shutdown signals
+    """
+    logger.info("Received shutdown signal. Cleaning up...")
+    sys.exit(0)
+
 if __name__ == "__main__":
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
-        symbol = os.environ.get('STOCK_SYMBOL', DEFAULT_SYMBOL)
-        fetch_realtime_data(symbol)
+        symbols = os.environ.get('STOCK_SYMBOLS', ','.join(DEFAULT_SYMBOLS)).split(',')
+        logger.info(f"Starting stock data collection for symbols: {symbols}")
+        logger.info(f"Update interval: {SLEEP_INTERVAL} seconds")
+        logger.info(f"Trading hours only: {TRADING_HOURS_ONLY}")
+        process_symbols(symbols)
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt. Shutting down...")
     except Exception as e:

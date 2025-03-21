@@ -21,7 +21,7 @@ STREAM_NAME="stock-stream"
 TABLE_NAME="stock-table"
 
 # IAM Configuration
-ROLE_NAME="${PROJECT_NAME}-role"
+ROLE_NAME="StockAnalysisRole"
 
 # Lambda Configuration
 LAMBDA_FUNCTION_NAME="${PROJECT_NAME}-processor"
@@ -32,6 +32,7 @@ LAYER_NAME="ta-lib-layer"
 # SageMaker Configuration
 SAGEMAKER_ENDPOINT="tsla-stock-predictor"
 SAGEMAKER_CONFIG_NAME="${SAGEMAKER_ENDPOINT}-config"
+SAGEMAKER_MODEL_NAME="${SAGEMAKER_ENDPOINT}-model"
 
 # =============== Helper Functions ===============
 function check_command() {
@@ -61,6 +62,12 @@ echo "Deleting SageMaker endpoint config '$SAGEMAKER_CONFIG_NAME'..."
 aws sagemaker delete-endpoint-config \
     --endpoint-config-name "$SAGEMAKER_CONFIG_NAME" \
     --region "$REGION" || handle_error "SageMaker endpoint config deletion failed"
+
+# Delete SageMaker model
+echo "Deleting SageMaker model '$SAGEMAKER_MODEL_NAME'..."
+aws sagemaker delete-model \
+    --model-name "$SAGEMAKER_MODEL_NAME" \
+    --region "$REGION" || handle_error "SageMaker model deletion failed"
 
 # Delete Lambda event source mapping
 echo "Deleting Lambda event source mapping..."
@@ -117,6 +124,10 @@ aws dynamodb delete-table \
     --table-name "$TABLE_NAME" \
     --region "$REGION" || handle_error "DynamoDB table deletion failed"
 
+# Wait for resources to be deleted
+echo "Waiting for resources to be deleted..."
+sleep 30
+
 # Detach IAM policies
 echo "Detaching IAM policies..."
 aws iam detach-role-policy \
@@ -134,6 +145,14 @@ aws iam detach-role-policy \
 aws iam detach-role-policy \
     --role-name "$ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/AmazonSageMakerFullAccess || handle_error "SageMaker policy detachment failed"
+
+aws iam detach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess || handle_error "S3 policy detachment failed"
+
+# Wait for policies to be detached
+echo "Waiting for policies to be detached..."
+sleep 10
 
 # Delete IAM role
 echo "Deleting IAM role '$ROLE_NAME'..."

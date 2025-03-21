@@ -23,7 +23,7 @@ TABLE_HASH_KEY="stock_symbol"
 TABLE_RANGE_KEY="timestamp"
 
 # IAM Configuration
-ROLE_NAME="${PROJECT_NAME}-role"
+ROLE_NAME="StockAnalysisRole"
 ROLE_DESCRIPTION="Role for Stock Analysis System"
 
 # SageMaker Configuration
@@ -42,6 +42,45 @@ function check_command() {
 # =============== Execution Section ===============
 # Check for required tools
 check_command "aws"
+
+# Create IAM role with expanded permissions
+echo "Creating IAM role '$ROLE_NAME'..."
+aws iam create-role \
+    --role-name "$ROLE_NAME" \
+    --assume-role-policy-document '{
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": ["lambda.amazonaws.com", "sagemaker.amazonaws.com"]
+                },
+                "Action": "sts:AssumeRole"
+            }
+        ]
+    }' || { echo "IAM role creation failed"; exit 1; }
+
+# Attach necessary IAM policies
+echo "Attaching IAM policies..."
+aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole || { echo "Basic execution policy attachment failed"; exit 1; }
+
+aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonKinesisFullAccess || { echo "Kinesis policy attachment failed"; exit 1; }
+
+aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess || { echo "DynamoDB policy attachment failed"; exit 1; }
+
+aws iam attach-role-policy \
+    --role-name "$ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/AmazonSageMakerFullAccess || { echo "SageMaker policy attachment failed"; exit 1; }
+
+# Wait for IAM role to be ready
+echo "Waiting for IAM role to be ready..."
+aws iam wait role-exists --role-name "$ROLE_NAME" || { echo "IAM role not ready"; exit 1; }
 
 # Create S3 bucket
 echo "Creating S3 bucket '$BUCKET_NAME'..."
@@ -142,44 +181,5 @@ if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     echo "Timeout waiting for DynamoDB table to become active"
     exit 1
 fi
-
-# Create IAM role with expanded permissions
-echo "Creating IAM role '$ROLE_NAME'..."
-aws iam create-role \
-    --role-name "$ROLE_NAME" \
-    --assume-role-policy-document '{
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": {
-                    "Service": ["lambda.amazonaws.com", "sagemaker.amazonaws.com"]
-                },
-                "Action": "sts:AssumeRole"
-            }
-        ]
-    }' || { echo "IAM role creation failed"; exit 1; }
-
-# Attach necessary IAM policies
-echo "Attaching IAM policies..."
-aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole || { echo "Basic execution policy attachment failed"; exit 1; }
-
-aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AmazonKinesisFullAccess || { echo "Kinesis policy attachment failed"; exit 1; }
-
-aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess || { echo "DynamoDB policy attachment failed"; exit 1; }
-
-aws iam attach-role-policy \
-    --role-name "$ROLE_NAME" \
-    --policy-arn arn:aws:iam::aws:policy/AmazonSageMakerFullAccess || { echo "SageMaker policy attachment failed"; exit 1; }
-
-# Wait for IAM role to be ready
-echo "Waiting for IAM role to be ready..."
-aws iam wait role-exists --role-name "$ROLE_NAME" || { echo "IAM role not ready"; exit 1; }
 
 echo "AWS infrastructure deployment completed successfully!"
