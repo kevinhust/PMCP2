@@ -1,5 +1,22 @@
 FROM python:3.9-slim-buster
 
+# 安装编译依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    make \
+    autoconf \
+    libtool \
+    python3-dev \
+    wget
+
+# 下载 ta-lib 源代码
+RUN wget https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz && \
+    tar -xzf ta-lib-0.4.0-src.tar.gz && \
+    cd ta-lib && \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install
+
 WORKDIR /app
 
 COPY requirements.txt .

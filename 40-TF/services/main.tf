@@ -143,37 +143,12 @@ resource "aws_iam_role_policy" "s3_policy" {
   })
 }
 
-# Lambda Layers
-resource "aws_lambda_layer_version" "base" {
-  layer_name          = "stock-analysis-base"
-  s3_bucket           = "kevinw-p2"
-  s3_key              = "lambda/base-layer.zip"
-  compatible_runtimes = ["python3.9"]
-}
-
-resource "aws_lambda_layer_version" "kinesis" {
-  layer_name          = "stock-analysis-kinesis"
-  s3_bucket           = "kevinw-p2"
-  s3_key              = "lambda/kinesis-layer.zip"
-  compatible_runtimes = ["python3.9"]
-}
-
-resource "aws_lambda_layer_version" "talib" {
-  layer_name          = "stock-analysis-talib"
-  s3_bucket           = "kevinw-p2"
-  s3_key              = "lambda/talib-layer.zip"
-  compatible_runtimes = ["python3.9"]
-}
-
-
 # Lambda Functions
 resource "aws_lambda_function" "push_to_kinesis" {
   function_name = "push-to-kinesis"
   role          = aws_iam_role.lambda_exec.arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.9"
-  s3_bucket     = "kevinw-p2"
-  s3_key        = "lambda/push_to_kinesis.zip"
+  package_type  = "Image"
+  image_uri     = "039444453392.dkr.ecr.us-east-1.amazonaws.com/pmc/push_to_kinesis:latest"
   timeout       = 60
   memory_size   = 1024
 
@@ -184,18 +159,14 @@ resource "aws_lambda_function" "push_to_kinesis" {
     }
   }
 
-  layers = [aws_lambda_layer_version.base.arn, aws_lambda_layer_version.kinesis.arn]
-
   tags = local.common_tags
 }
 
 resource "aws_lambda_function" "process_stock_data" {
   function_name = "process-stock-data"
   role          = aws_iam_role.lambda_exec.arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.9"
-  s3_bucket     = "kevinw-p2"
-  s3_key        = "lambda/process_stock_data.zip"
+  package_type  = "Image"
+  image_uri     = "039444453392.dkr.ecr.us-east-1.amazonaws.com/pmc/process_stock_data:latest"
   timeout       = 60
   memory_size   = 1024
 
@@ -205,8 +176,6 @@ resource "aws_lambda_function" "process_stock_data" {
       DYNAMO_TABLE        = aws_dynamodb_table.stock_table.name
     }
   }
-
-  layers = [aws_lambda_layer_version.base.arn, aws_lambda_layer_version.talib.arn]
 
   tags = local.common_tags
 }
@@ -228,8 +197,6 @@ resource "aws_lambda_function" "export_dynamodb_to_s3" {
       S3_PREFIX    = "stock-data"
     }
   }
-
-  layers = [aws_lambda_layer_version.base.arn]
 
   tags = local.common_tags
 }
