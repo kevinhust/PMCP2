@@ -1,4 +1,0 @@
-pandas
-numpy
-ta-lib
-boto3

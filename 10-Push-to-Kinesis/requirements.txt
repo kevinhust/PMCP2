@@ -1,3 +1,0 @@
-yfinance==0.2.18
-tenacity==8.2.2
-boto3==1.35.1

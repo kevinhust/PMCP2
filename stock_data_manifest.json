@@ -1,0 +1,15 @@
+{
+  "fileLocations": [
+      {
+          "URIs": [
+              "https://kevinw-p2.s3.us-east-1.amazonaws.com/stock-data//stock_data.csv"
+          ]
+      }
+  ],
+  "globalUploadSettings": {
+      "format": "CSV",
+      "delimiter": ",",
+      "textqualifier": "\"",
+      "containsHeader": "true"
+  }
+}
